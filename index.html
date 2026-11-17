@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>ESONJ's Token Maker</title>
+<style>
+/* layout idea: one persistent canvas; tool rail left, contextual inspector right; both fold to a bottom bar and drawer when narrow */
+:root{
+  color-scheme:dark;
+  --bg:#0b0a0c; --panel:#151317; --raise:#1e1b21; --line:#322d37; --ink:#f4eff1; --mut:#b9aeb5;
+  --acc:#c81e3a; --acc-hi:#e8405a; --mask:#2ee6d6; --warn:#ffb020; --ok:#63d391;
+  --display:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.4 var(--body);overflow:hidden;-webkit-tap-highlight-color:transparent}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid #fff;outline-offset:2px}
+#app{display:grid;height:100%;grid-template-columns:76px minmax(0,1fr) 316px;grid-template-rows:52px minmax(0,1fr);grid-template-areas:"top top top" "tools stage insp"}
+#top{grid-area:top;display:flex;align-items:center;gap:8px;padding:0 12px;background:var(--panel);border-bottom:1px solid var(--line);min-width:0}
+.brand{font:600 17px var(--display);white-space:nowrap;letter-spacing:.01em}
+.brand b{color:var(--acc-hi);font-weight:600}
+.sp{flex:1}
+.btn{background:var(--raise);border:1px solid var(--line);border-radius:7px;padding:7px 11px;cursor:pointer;white-space:nowrap;min-height:34px}
+.btn:hover{border-color:#5a5261}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+.btn.primary:hover{background:#d92644}
+.btn.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.small{padding:5px 9px;min-height:30px;font-size:13px}
+.btn.wide{width:100%}
+.chip{font-size:12px;color:var(--mut);padding:4px 9px;border:1px solid var(--line);border-radius:99px;white-space:nowrap;background:none}
+.chip.warn{color:var(--warn);border-color:#6a4a10;cursor:pointer}
+.chip.ok{color:var(--ok)}
+#tools{grid-area:tools;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px;padding:10px 8px}
+.tool{display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 2px;border-radius:9px;border:1px solid transparent;background:none;cursor:pointer;font-size:12px;color:var(--mut);min-height:58px}
+.tool svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7}
+.tool:hover{color:var(--ink);background:var(--raise)}
+.tool[aria-pressed="true"]{background:var(--acc);color:#fff}
+.tool.only-narrow{display:none}
+#stage{grid-area:stage;position:relative;min-width:0;min-height:0;background:#070608;overflow:hidden}
+#view{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block;cursor:grab}
+#view:focus-visible{outline:2px solid var(--acc-hi);outline-offset:-2px}
+#insp{grid-area:insp;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:12px 14px 28px;min-height:0}
+#insp h2{font:600 15px var(--display);margin:0 0 10px;letter-spacing:.01em}
+.sec{border-top:1px solid var(--line);padding:12px 0 4px;display:flex;flex-direction:column;gap:9px}
+.sec:first-of-type{border-top:0;padding-top:0}
+.sec h3{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);margin:0}
+.row{display:grid;grid-template-columns:92px minmax(0,1fr) 42px;align-items:center;gap:8px}
+.row>span{color:var(--ink)}
+.row output{font-variant-numeric:tabular-nums;text-align:right;color:var(--mut);font-size:12px}
+input[type=range]{width:100%;accent-color:var(--acc-hi);height:26px;margin:0}
+.seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{flex:1;background:var(--raise);border:0;border-left:1px solid var(--line);padding:7px 6px;cursor:pointer;min-height:34px;font-size:13px}
+.seg button:first-child{border-left:0}
+.seg button[aria-pressed="true"]{background:var(--acc);color:#fff;font-weight:600}
+.btns{display:flex;flex-wrap:wrap;gap:6px}
+.note{font-size:12.5px;color:var(--mut);margin:0}
+.note.warn{color:var(--warn)}
+.check{display:flex;align-items:center;gap:8px;cursor:pointer;min-height:28px}
+.check input{width:17px;height:17px;accent-color:var(--acc-hi)}
+.swatch{display:flex;align-items:center;gap:8px}
+.swatch input[type=color]{width:40px;height:30px;border:1px solid var(--line);border-radius:6px;background:none;padding:2px;cursor:pointer}
+.field{background:#0e0d10;border:1px solid var(--line);border-radius:7px;padding:7px 9px;width:100%;min-height:34px}
+.previews{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.previews figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--mut)}
+.previews canvas{border-radius:6px;display:block}
+.pv-light{background:#e9e4dc}.pv-dark{background:#17151a}
+.overlay{position:absolute;z-index:5}
+#start{inset:0;display:flex;align-items:center;justify-content:center;padding:16px}
+#start .card{border:2px dashed #5a5261;border-radius:16px;padding:30px 28px;text-align:center;max-width:420px;background:rgba(11,10,12,.88)}
+#start h1{font:600 24px var(--display);margin:0 0 6px;text-wrap:balance}
+#start p{color:var(--mut);margin:0 0 18px}
+#start .btns{justify-content:center;gap:10px}
+#start .btn{min-height:44px;padding:10px 18px;font-size:15px}
+#hud{left:10px;top:10px;display:flex;gap:8px;flex-wrap:wrap;max-width:calc(100% - 20px);pointer-events:none}
+#hud>*{pointer-events:auto}
+.bar{background:rgba(21,19,23,.96);border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;box-shadow:0 6px 24px rgba(0,0,0,.5)}
+.bar.warnbar{border-color:#6a4a10;color:var(--warn)}
+#cutbar,#progress{left:50%;transform:translateX(-50%);bottom:14px;max-width:calc(100% - 20px);width:max-content}
+#progress{min-width:260px}
+#progress .track{flex:1 1 120px;height:6px;background:#2a2630;border-radius:9px;overflow:hidden;min-width:100px}
+#progress .fill{height:100%;background:var(--acc-hi);width:0;transition:width .15s}
+#progress .fill.ind{width:35%;animation:ind 1.1s linear infinite}
+@keyframes ind{from{margin-left:-35%}to{margin-left:100%}}
+@media (prefers-reduced-motion:reduce){#progress .fill.ind{animation:none;margin-left:32%}}
+#toast{left:50%;transform:translateX(-50%);top:12px;max-width:min(520px,calc(100% - 20px))}
+#dropHint{inset:8px;border:3px dashed var(--acc-hi);border-radius:14px;background:rgba(200,30,58,.12);display:flex;align-items:center;justify-content:center;font:600 20px var(--display);pointer-events:none}
+[hidden]{display:none!important}
+.modal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:14px}
+.dlg{background:var(--panel);border:1px solid var(--line);border-radius:14px;width:min(860px,100%);max-height:100%;display:flex;flex-direction:column;overflow:hidden}
+.dlg.narrow{width:min(460px,100%)}
+.dlg header{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.dlg header h2{font:600 17px var(--display);margin:0;flex:1}
+.dlg .body{padding:16px;overflow-y:auto;display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:18px}
+.dlg.narrow .body{grid-template-columns:minmax(0,1fr)}
+.dlg .col{display:flex;flex-direction:column;gap:10px;min-width:0}
+.pvbox{background:repeating-conic-gradient(#3b3740 0% 25%,#27242b 0% 50%) 0 0/20px 20px;border-radius:10px;display:flex;align-items:center;justify-content:center;aspect-ratio:1;overflow:hidden;position:relative}
+.pvbox canvas,.pvbox img{max-width:100%;max-height:100%;display:block;touch-action:none}
+.modes{display:flex;flex-direction:column;gap:4px}
+.modes button{text-align:left;background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;min-height:40px}
+.modes button small{display:block;color:var(--mut);font-size:12px}
+.modes button[aria-pressed="true"]{border-color:var(--acc-hi);box-shadow:inset 3px 0 0 var(--acc-hi)}
+.callout{border:1px solid #6a4a10;background:rgba(255,176,32,.08);border-radius:9px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.menu{position:absolute;right:10px;top:50px;z-index:20;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;display:flex;flex-direction:column;min-width:220px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+.menu button{background:none;border:0;text-align:left;padding:9px 10px;border-radius:6px;cursor:pointer;min-height:38px}
+.menu button:hover{background:var(--raise)}
+.menu hr{border:0;border-top:1px solid var(--line);margin:4px 0;width:100%}
+dl.status{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 14px;margin:0}
+dl.status dt{color:var(--mut)}dl.status dd{margin:0}
+.hide-narrow{display:inline}
+@media (max-width:460px){.hide-xs{display:none}}
+@media (max-width:860px){
+  #app{grid-template-columns:minmax(0,1fr);grid-template-rows:48px minmax(0,1fr) auto;grid-template-areas:"top" "stage" "tools"}
+  #tools{flex-direction:row;border-right:0;border-top:1px solid var(--line);padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px));justify-content:space-around;gap:4px}
+  .tool{flex:1;min-height:52px;padding:6px 2px}
+  .tool.only-narrow{display:flex}
+  #insp{position:relative;z-index:12;grid-area:stage;align-self:end;max-height:52%;border-left:0;border-top:1px solid var(--line);border-radius:14px 14px 0 0;box-shadow:0 -10px 30px rgba(0,0,0,.6)}
+  #insp.closed{display:none}
+  .hide-narrow{display:none}
+  .brand{font-size:15px}
+  #top{padding:0 8px;gap:5px}
+  #top .btn{padding:7px 9px}
+  #top .chip{font-size:11px;padding:3px 7px}
+  .btn{min-height:40px}
+  .seg button{min-height:42px}
+  input[type=range]{height:36px}
+  .dlg .body{grid-template-columns:minmax(0,1fr)}
+  .pvbox{max-width:300px;margin:0 auto;width:100%}
+  #cutbar,#progress{bottom:8px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="brand">ESONJ's <b>Token<span class="hide-xs"> Maker</span></b></div>
+    <span class="sp"></span>
+    <button class="chip" id="saveState" type="button" hidden></button>
+    <button class="btn" id="btnUndo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">Undo</button>
+    <button class="btn hide-narrow" id="btnRedo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">Redo</button>
+    <button class="btn hide-narrow" id="btnFitView" type="button" title="Zoom to fit (0)">Zoom to fit</button>
+    <button class="btn" id="btnMenu" type="button" aria-haspopup="true" aria-expanded="false">File</button>
+    <button class="btn primary" id="btnExport" type="button">Export</button>
+  </header>
+  <nav id="tools" aria-label="Tools">
+    <button class="tool" id="toolCompose" type="button" aria-pressed="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg>Compose</button>
+    <button class="tool" id="toolPopout" type="button" aria-pressed="false"><svg viewBox="0 0 24 24"><circle cx="11" cy="13" r="7"/><path d="M14 10l7-7M21 3v5M21 3h-5"/></svg>Pop-out</button>
+    <button class="tool" id="toolColor" type="button" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11z"/></svg>Color</button>
+    <button class="tool only-narrow" id="toolPanel" type="button" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="17" r="2"/></svg>Controls</button>
+  </nav>
+  <main id="stage">
+    <canvas id="view" tabindex="0" aria-label="Token canvas. Arrow keys nudge the selected layer, 0 zooms to fit."></canvas>
+    <div class="overlay" id="start">
+      <div class="card">
+        <h1>Make a pop-out token</h1>
+        <p>Drop a portrait here, or start from the demo knight. Artwork stays on this device.</p>
+        <div class="btns">
+          <button class="btn primary" id="btnDrop" type="button">Drop Artwork</button>
+          <button class="btn" id="btnDemo" type="button">Try Demo</button>
+        </div>
+      </div>
+    </div>
+    <div class="overlay" id="hud"></div>
+    <div class="overlay bar" id="toast" role="status" hidden></div>
+    <div class="overlay bar" id="cutbar" hidden></div>
+    <div class="overlay bar" id="progress" hidden><span id="progLabel">Loading</span><div class="track"><div class="fill" id="progFill"></div></div><button class="btn small" id="progCancel" type="button">Cancel</button></div>
+    <div class="overlay" id="dropHint" hidden>Drop to load</div>
+  </main>
+  <aside id="insp" aria-label="Inspector"></aside>
+</div>
+<div class="menu" id="menu" hidden></div>
+<div id="modals"></div>
+<input type="file" id="fileArt" accept="image/png,image/jpeg,image/webp" hidden>
+<input type="file" id="fileBorder" accept="image/png,image/webp" hidden>
+<input type="file" id="fileProject" accept=".json,application/json" hidden>
+<input type="file" id="filePreset" accept=".json,application/json" hidden>
+<script src="js/core.js"></script>
+<script src="js/render.js"></script>
+<script src="js/cutout.js"></script>
+<script src="js/store.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/dialogs.js"></script>
+</body>
+</html>
